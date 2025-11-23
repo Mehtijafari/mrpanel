@@ -65,8 +65,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install .
-          pip install pymysql pytest
+          pip install -e ".[dev]"
+          pip install pymysql
 
       - name: Run Alembic Migrations
         run: alembic upgrade head
