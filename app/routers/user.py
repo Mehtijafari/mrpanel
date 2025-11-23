@@ -505,7 +505,7 @@ def active_next_plan(
     if (dbuser is None or dbuser.next_plan is None):
         raise HTTPException(
             status_code=404,
-            detail=f"User doesn't have next plan",
+            detail="User doesn't have next plan",
         )
 
     if dbuser.status in [UserStatus.active, UserStatus.on_hold]:

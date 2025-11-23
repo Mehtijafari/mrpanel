@@ -30,7 +30,6 @@ import platform
 import zipfile
 import io
 import stat
-import shutil
 
 router = APIRouter(tags=["Core"], prefix="/api", responses={401: responses._401})
 

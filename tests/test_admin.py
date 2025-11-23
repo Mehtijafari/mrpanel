@@ -84,28 +84,6 @@ def test_get_admin_nodes_usage(auth_client: TestClient):
     assert "usages" in data
 
 
-def test_get_admin_daily_usage(auth_client: TestClient):
-    response = auth_client.get("/api/admin/testadmin/usage/daily")
-    assert response.status_code == 200
-    data = response.json()
-    assert "usages" in data
-
-
-def test_get_admin_usage_chart(auth_client: TestClient):
-    response = auth_client.get("/api/admin/testadmin/usage/chart")
-    assert response.status_code == 200
-    data = response.json()
-    assert "usages" in data
-
-
-def test_get_admin_nodes_usage(auth_client: TestClient):
-    response = auth_client.get("/api/admin/testadmin/usage/nodes")
-    assert response.status_code == 200
-    data = response.json()
-    assert isinstance(data, dict)
-    assert "usages" in data
-
-
 def test_enable_admin(auth_client: TestClient):
     # First create and disable an admin
     admin_data = {"username": "enableadmin", "password": "enablepass123", "role": "standard"}

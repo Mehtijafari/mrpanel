@@ -75,6 +75,10 @@ class XRayCore:
                     for buf in list(self._temp_log_buffers.values()):
                         buf.append(output)
                     logger.debug(output)
+                    # Log errors and warnings at appropriate levels
+                    output_lower = output.lower()
+                    if any(keyword in output_lower for keyword in ['error', 'failed', 'rejected', 'bad request', '400', 'handshake', 'invalid']):
+                        logger.warning(f"Xray: {output}")
 
                 elif not self.process or self.process.poll() is not None:
                     break
@@ -87,14 +91,41 @@ class XRayCore:
                     self._logs_buffer.append(output)
                     for buf in list(self._temp_log_buffers.values()):
                         buf.append(output)
+                    # Log errors and warnings even in non-debug mode
+                    output_lower = output.lower()
+                    if any(keyword in output_lower for keyword in ['error', 'failed', 'rejected', 'bad request', '400', 'handshake', 'invalid']):
+                        logger.warning(f"Xray: {output}")
 
                 elif not self.process or self.process.poll() is not None:
                     break
 
+        def capture_stderr():
+            """Capture stderr separately to catch connection errors that might not appear in stdout"""
+            while self.process:
+                try:
+                    output = self.process.stderr.readline()
+                    if output:
+                        output = output.strip()
+                        self._logs_buffer.append(output)
+                        for buf in list(self._temp_log_buffers.values()):
+                            buf.append(output)
+                        # Always log stderr as it usually contains errors
+                        output_lower = output.lower()
+                        if any(keyword in output_lower for keyword in ['error', 'failed', 'rejected', 'bad request', '400', 'handshake', 'invalid', 'connection']):
+                            logger.warning(f"Xray stderr: {output}")
+                        elif DEBUG:
+                            logger.debug(f"Xray stderr: {output}")
+                    elif not self.process or self.process.poll() is not None:
+                        break
+                except Exception:
+                    break
+
         if DEBUG:
-            threading.Thread(target=capture_and_debug_log).start()
+            threading.Thread(target=capture_and_debug_log, daemon=True).start()
+            threading.Thread(target=capture_stderr, daemon=True).start()
         else:
-            threading.Thread(target=capture_only).start()
+            threading.Thread(target=capture_only, daemon=True).start()
+            threading.Thread(target=capture_stderr, daemon=True).start()
 
     @contextmanager
     def get_logs(self):
