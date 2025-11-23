@@ -584,6 +584,18 @@ class XRayConfig(dict):
                                 "email": email,
                                 **existing_settings
                             }
+                            # Remove flow if inbound doesn't support it (flow is optional)
+                            if client_to_add.get('flow') and inbound:
+                                network = inbound.get('network', 'tcp')
+                                tls_type = inbound.get('tls', 'none')
+                                header_type = inbound.get('header_type', '')
+                                flow_supported = (
+                                    network in ('tcp', 'raw', 'kcp')
+                                    and tls_type in ('tls', 'reality')
+                                    and header_type != 'http'
+                                )
+                                if not flow_supported:
+                                    del client_to_add['flow']
                         elif credential_key and proxy_type_enum in UUID_PROTOCOLS:
                             try:
                                 settings_obj = ProxySettings.from_dict(proxy_type_enum, existing_settings)
@@ -606,26 +618,29 @@ class XRayConfig(dict):
                                 for key, value in runtime_settings.items():
                                     if key != 'id':
                                         client_to_add[key] = value
+                                
+                                # Remove flow if inbound doesn't support it (flow is optional)
+                                # Flow should only be used with TCP/raw/kcp + TLS/Reality (without HTTP header)
+                                if client_to_add.get('flow') and inbound:
+                                    network = inbound.get('network', 'tcp')
+                                    tls_type = inbound.get('tls', 'none')
+                                    header_type = inbound.get('header_type', '')
+                                    flow_supported = (
+                                        network in ('tcp', 'raw', 'kcp')
+                                        and tls_type in ('tls', 'reality')
+                                        and header_type != 'http'
+                                    )
+                                    if not flow_supported:
+                                        # Remove flow if inbound doesn't support it - user can still connect without flow
+                                        del client_to_add['flow']
                             except Exception as e:
                                 logger = logging.getLogger("uvicorn.error")
                                 logger.warning(f"Failed to generate UUID from key for user {user_id}: {e}")
                                 client_to_add = None
                         
                         if client_to_add:
-                            # XTLS currently only supports transmission methods of TCP and mKCP
-                            if client_to_add.get('flow') and (
-                                    inbound.get('network', 'tcp') not in ('tcp', 'raw', 'kcp')
-                                    or
-                                    (
-                                        inbound.get('network', 'tcp') in ('tcp', 'raw', 'kcp')
-                                        and
-                                        inbound.get('tls') not in ('tls', 'reality')
-                                    )
-                                    or
-                                    inbound.get('header_type') == 'http'
-                            ):
-                                del client_to_add['flow']
-                            
+                            # Flow is optional - users with flow can connect if inbound supports it,
+                            # users without flow can always connect
                             clients.append(client_to_add)
                         else:
                             # If no client was added, this is an error case

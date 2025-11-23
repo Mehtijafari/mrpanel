@@ -94,7 +94,18 @@ def add_user(dbuser: "DBUser"):
                     proxy_settings = runtime_proxy_settings(
                         settings_model, proxy_type, user.credential_key
                     )
-                    proxy_settings.pop('flow', None)
+                    # Remove flow if inbound doesn't support it (flow is optional)
+                    if proxy_settings.get('flow') and inbound:
+                        network = inbound.get('network', 'tcp')
+                        tls_type = inbound.get('tls', 'none')
+                        header_type = inbound.get('header_type', '')
+                        flow_supported = (
+                            network in ('tcp', 'raw', 'kcp')
+                            and tls_type in ('tls', 'reality')
+                            and header_type != 'http'
+                        )
+                        if not flow_supported:
+                            proxy_settings.pop('flow', None)
                     account_to_add = proxy_type.account_model(email=email, **proxy_settings)
                 except Exception as e:
                     logger.warning(f"Failed to generate UUID from key for user {dbuser.id} in add_user: {e}")
@@ -150,7 +161,18 @@ def update_user(dbuser: "DBUser"):
                     proxy_settings = runtime_proxy_settings(
                         settings_model, proxy_type, user.credential_key
                     )
-                    proxy_settings.pop('flow', None)
+                    # Remove flow if inbound doesn't support it (flow is optional)
+                    if proxy_settings.get('flow') and inbound:
+                        network = inbound.get('network', 'tcp')
+                        tls_type = inbound.get('tls', 'none')
+                        header_type = inbound.get('header_type', '')
+                        flow_supported = (
+                            network in ('tcp', 'raw', 'kcp')
+                            and tls_type in ('tls', 'reality')
+                            and header_type != 'http'
+                        )
+                        if not flow_supported:
+                            proxy_settings.pop('flow', None)
                     account_to_add = proxy_type.account_model(email=email, **proxy_settings)
                 except Exception as e:
                     logger.warning(f"Failed to generate UUID from key for user {dbuser.id} in update_user: {e}")
