@@ -1210,17 +1210,33 @@ def get_user_queryset(db: Session, eager_load: bool = True) -> Query:
     return query
 
 
+def _apply_service_filter(
+    query,
+    service_id: Optional[int] = None,
+    service_without_assignment: bool = False,
+):
+    if service_without_assignment:
+        return query.filter(User.service_id.is_(None))
+    if service_id is not None:
+        return query.filter(User.service_id == service_id)
+    return query
+
+
 def count_users(
     db: Session,
     admin: Optional[Admin] = None,
     service_id: Optional[int] = None,
+    service_without_assignment: bool = False,
 ) -> int:
     """Return a lightweight count of users respecting admin/service filters."""
     query = get_user_queryset(db, eager_load=False)
     if admin:
         query = query.filter(User.admin == admin)
-    if service_id is not None:
-        query = query.filter(User.service_id == service_id)
+    query = _apply_service_filter(
+        query,
+        service_id=service_id,
+        service_without_assignment=service_without_assignment,
+    )
     return query.count()
 
 
@@ -2335,6 +2351,7 @@ def adjust_all_users_expire(
     delta_seconds: int,
     admin: Optional[Admin] = None,
     service_id: Optional[int] = None,
+    service_without_assignment: bool = False,
 ) -> int:
     if delta_seconds == 0:
         return 0
@@ -2344,8 +2361,11 @@ def adjust_all_users_expire(
     )
     if admin:
         query = query.filter(User.admin == admin)
-    if service_id is not None:
-        query = query.filter(User.service_id == service_id)
+    query = _apply_service_filter(
+        query,
+        service_id=service_id,
+        service_without_assignment=service_without_assignment,
+    )
     now = datetime.utcnow().timestamp()
     count = 0
     for dbuser in query.all():
@@ -2411,6 +2431,7 @@ def move_users_to_service(
     target_service: Service,
     admin: Optional[Admin] = None,
     service_id: Optional[int] = None,
+    service_without_assignment: bool = False,
 ) -> int:
     """Move users to a new service, honoring optional admin/service filters."""
     query = get_user_queryset(db)
@@ -2437,6 +2458,7 @@ def move_users_to_service_fast(
     target_service: Service,
     admin: Optional[Admin] = None,
     service_id: Optional[int] = None,
+    service_without_assignment: bool = False,
 ) -> int:
     """
     Move users with a single bulk UPDATE for very large batches.
@@ -2445,12 +2467,43 @@ def move_users_to_service_fast(
     query = get_user_queryset(db, eager_load=False)
     if admin:
         query = query.filter(User.admin == admin)
-    if service_id is not None:
-        query = query.filter(User.service_id == service_id)
+    query = _apply_service_filter(
+        query,
+        service_id=service_id,
+        service_without_assignment=service_without_assignment,
+    )
     query = query.filter(or_(User.service_id.is_(None), User.service_id != target_service.id))
 
     affected = query.update(
         {User.service_id: target_service.id},
+        synchronize_session=False,
+    )
+    if affected:
+        db.commit()
+    return affected
+
+def clear_users_service(
+    db: Session,
+    admin: Optional[Admin] = None,
+    service_id: Optional[int] = None,
+    service_without_assignment: bool = False,
+) -> int:
+    """
+    Remove the service assignment for matching users.
+    """
+    query = get_user_queryset(db)
+    if admin:
+        query = query.filter(User.admin == admin)
+    query = _apply_service_filter(
+        query,
+        service_id=service_id,
+        service_without_assignment=service_without_assignment,
+    )
+    if not service_without_assignment:
+        query = query.filter(User.service_id.isnot(None))
+
+    affected = query.update(
+        {User.service_id: None},
         synchronize_session=False,
     )
     if affected:
@@ -2463,6 +2516,7 @@ def adjust_all_users_limit(
     delta_bytes: int,
     admin: Optional[Admin] = None,
     service_id: Optional[int] = None,
+    service_without_assignment: bool = False,
 ) -> int:
     """Increase or decrease data limits for users, optionally scoped by admin/service."""
     if delta_bytes == 0:
@@ -2474,8 +2528,11 @@ def adjust_all_users_limit(
     )
     if admin:
         query = query.filter(User.admin == admin)
-    if service_id is not None:
-        query = query.filter(User.service_id == service_id)
+    query = _apply_service_filter(
+        query,
+        service_id=service_id,
+        service_without_assignment=service_without_assignment,
+    )
 
     count = 0
     for dbuser in query.all():
@@ -2496,13 +2553,17 @@ def delete_users_by_status_age(
     days: int,
     admin: Optional[Admin] = None,
     service_id: Optional[int] = None,
+    service_without_assignment: bool = False,
 ) -> int:
     cutoff = datetime.utcnow() - timedelta(days=days)
     query = get_user_queryset(db).filter(User.status.in_(statuses))
     if admin:
         query = query.filter(User.admin == admin)
-    if service_id is not None:
-        query = query.filter(User.service_id == service_id)
+    query = _apply_service_filter(
+        query,
+        service_id=service_id,
+        service_without_assignment=service_without_assignment,
+    )
     query = query.filter(User.last_status_change.isnot(None))
     query = query.filter(User.last_status_change <= cutoff)
     candidates = query.all()
@@ -2577,12 +2638,16 @@ def bulk_update_user_status(
     target_status: UserStatus,
     admin: Optional[Admin] = None,
     service_id: Optional[int] = None,
+    service_without_assignment: bool = False,
 ) -> int:
     query = get_user_queryset(db)
     if admin:
         query = query.filter(User.admin == admin)
-    if service_id is not None:
-        query = query.filter(User.service_id == service_id)
+    query = _apply_service_filter(
+        query,
+        service_id=service_id,
+        service_without_assignment=service_without_assignment,
+    )
 
     count = 0
     for user in query.all():

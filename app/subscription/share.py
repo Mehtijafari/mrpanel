@@ -281,10 +281,15 @@ def process_inbounds_and_tags(
                 continue
 
             host_list = xray.hosts.get(tag, [])
-            for position, host in enumerate(host_list):
+            sorted_host_list = sorted(
+                host_list,
+                key=lambda h: (h.get("sort", 0), h.get("id") or 0)
+            )
+            for position, host in enumerate(sorted_host_list):
                 host_id = host.get("id")
-                if allowed_host_ids is not None and host_id not in allowed_host_ids:
-                    continue
+                if allowed_host_ids is not None:
+                    if host_id is None or host_id not in allowed_host_ids:
+                        continue
                 host_entries.append(
                     (
                         protocol,
@@ -294,7 +299,7 @@ def process_inbounds_and_tags(
                         host,
                         inbound_index.get(tag, float("inf")),
                         position,
-                        host_id,
+                        host_id if host_id is not None else 0,
                     )
                 )
 
@@ -302,7 +307,7 @@ def process_inbounds_and_tags(
         key=lambda entry: (
             service_host_orders.get(
                 entry[7], entry[4].get("sort", 0)
-            ),
+            ) if entry[7] is not None else entry[4].get("sort", 0),
             entry[5],
             entry[6],
         )

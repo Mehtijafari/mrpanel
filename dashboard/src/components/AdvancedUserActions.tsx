@@ -40,6 +40,9 @@ import { useAdminsStore } from "contexts/AdminsContext";
 import { useServicesStore } from "contexts/ServicesContext";
 
 const cleanupOptions: AdvancedUserActionStatus[] = ["expired", "limited"];
+type ServiceScopePayload = Partial<
+  Pick<AdvancedUserActionPayload, "service_id" | "service_id_is_null">
+>;
 
 type OwnerSelection = "my_users" | "all_users" | `admin:${string}`;
 
@@ -62,8 +65,8 @@ const AdvancedUserActions = () => {
   const [isDecreasingTraffic, setIsDecreasingTraffic] = useState(false);
   const [isCleaning, setIsCleaning] = useState(false);
   const [ownerSelection, setOwnerSelection] = useState<OwnerSelection>("my_users");
-  const [selectedServiceId, setSelectedServiceId] = useState<number | null>(null);
-  const [targetServiceId, setTargetServiceId] = useState<number | null>(null);
+  const [selectedServiceValue, setSelectedServiceValue] = useState("");
+  const [targetServiceValue, setTargetServiceValue] = useState("");
   const [isChangingService, setIsChangingService] = useState(false);
   const { admins: adminList, fetchAdmins } = useAdminsStore();
   const servicesStore = useServicesStore();
@@ -117,6 +120,16 @@ const AdvancedUserActions = () => {
     );
   };
 
+  const buildServiceScopePayload = (): ServiceScopePayload => {
+    if (selectedServiceValue === "no_service") {
+      return { service_id_is_null: true };
+    }
+    if (!selectedServiceValue) {
+      return {};
+    }
+    return { service_id: Number(selectedServiceValue) };
+  };
+
   const handleExpireAction = async (action: AdvancedUserActionType) => {
     const days = Number(expireDays);
     if (!Number.isFinite(days) || days <= 0) {
@@ -134,7 +147,7 @@ const AdvancedUserActions = () => {
         action,
         days: Math.floor(days),
         admin_username: targetAdminUsername,
-        service_id: selectedServiceId ?? undefined,
+        ...buildServiceScopePayload(),
       };
       const result = await performBulkUserAction(payload);
       showToast(
@@ -168,7 +181,7 @@ const AdvancedUserActions = () => {
         action,
         gigabytes: value,
         admin_username: targetAdminUsername,
-        service_id: selectedServiceId ?? undefined,
+        ...buildServiceScopePayload(),
       };
       const result = await performBulkUserAction(payload);
       showToast(
@@ -210,7 +223,7 @@ const AdvancedUserActions = () => {
         days: Math.floor(days),
         statuses: selectedStatuses,
         admin_username: targetAdminUsername,
-        service_id: selectedServiceId ?? undefined,
+        ...buildServiceScopePayload(),
       };
       const result = await performBulkUserAction(payload);
       showToast(
@@ -228,7 +241,7 @@ const AdvancedUserActions = () => {
   };
 
   const handleChangeService = async () => {
-    if (!targetServiceId) {
+    if (!targetServiceValue) {
       showToast(
         t(
           "filters.advancedActions.error.targetServiceRequired",
@@ -238,13 +251,15 @@ const AdvancedUserActions = () => {
       );
       return;
     }
+    const resolvedTargetServiceId =
+      targetServiceValue === "no_service" ? null : Number(targetServiceValue);
     setIsChangingService(true);
     try {
       const payload: AdvancedUserActionPayload = {
         action: "change_service",
         admin_username: resolveTargetAdminUsername(),
-        service_id: selectedServiceId ?? undefined,
-        target_service_id: targetServiceId,
+        ...buildServiceScopePayload(),
+        target_service_id: resolvedTargetServiceId,
       };
       const result = await performBulkUserAction(payload);
       showToast(
@@ -347,18 +362,20 @@ const AdvancedUserActions = () => {
                       {t("filters.advancedActions.service.label", "Service scope")}
                     </FormLabel>
                     <Select
-                      value={selectedServiceId ?? ""}
+                      value={selectedServiceValue}
                       onChange={(event) => {
-                        const value = event.target.value;
-                        setSelectedServiceId(value ? Number(value) : null);
+                        setSelectedServiceValue(event.target.value);
                       }}
                       size="sm"
                     >
                       <option value="">
                         {t("filters.advancedActions.service.all", "All services")}
                       </option>
+                      <option value="no_service">
+                        {t("filters.advancedActions.serviceChange.noService", "No service")}
+                      </option>
                       {servicesStore.services.map((service) => (
-                        <option key={service.id} value={service.id}>
+                        <option key={service.id} value={String(service.id)}>
                           {service.name}
                         </option>
                       ))}
@@ -390,15 +407,15 @@ const AdvancedUserActions = () => {
                           "filters.advancedActions.serviceChange.placeholder",
                           "Select target service"
                         )}
-                        value={targetServiceId ?? ""}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          setTargetServiceId(value ? Number(value) : null);
-                        }}
+                        value={targetServiceValue}
+                        onChange={(event) => setTargetServiceValue(event.target.value)}
                         size="sm"
                       >
+                        <option value="no_service">
+                          {t("filters.advancedActions.serviceChange.noService", "No service")}
+                        </option>
                         {servicesStore.services.map((service) => (
-                          <option key={service.id} value={service.id}>
+                          <option key={service.id} value={String(service.id)}>
                             {service.name}
                           </option>
                         ))}

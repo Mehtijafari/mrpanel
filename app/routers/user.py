@@ -358,6 +358,8 @@ def perform_users_bulk_action(
     target_admin: Optional[Admin] = None
     target_service = None
     destination_service = None
+    target_service_id = payload.target_service_id
+    service_filter_by_null = bool(payload.service_id_is_null)
 
     if admin.role in (AdminRole.sudo, AdminRole.full_access):
         if payload.admin_username:
@@ -368,8 +370,8 @@ def perform_users_bulk_action(
             target_service = crud.get_service(db, payload.service_id)
             if not target_service:
                 raise HTTPException(status_code=404, detail="Service not found")
-        if payload.action == AdvancedUserAction.change_service and payload.target_service_id:
-            destination_service = crud.get_service(db, payload.target_service_id)
+        if payload.action == AdvancedUserAction.change_service and target_service_id is not None:
+            destination_service = crud.get_service(db, target_service_id)
             if not destination_service:
                 raise HTTPException(status_code=404, detail="Target service not found")
     else:
@@ -389,9 +391,12 @@ def perform_users_bulk_action(
             if target_admin.id not in target_service.admin_ids:
                 raise HTTPException(status_code=403, detail="Service not assigned to admin")
         if payload.action == AdvancedUserAction.change_service:
-            if payload.target_service_id is None:
-                raise HTTPException(status_code=400, detail="target_service_id is required")
-            destination_service = crud.get_service(db, payload.target_service_id)
+            if target_service_id is None:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Standard admins must select a target service",
+                )
+            destination_service = crud.get_service(db, target_service_id)
             if not destination_service:
                 raise HTTPException(status_code=404, detail="Target service not found")
             if target_admin.id not in destination_service.admin_ids:
@@ -400,63 +405,108 @@ def perform_users_bulk_action(
     try:
         if payload.action == AdvancedUserAction.extend_expire:
             affected = crud.adjust_all_users_expire(
-                db, payload.days * 86400, admin=target_admin, service_id=payload.service_id
+                db,
+                payload.days * 86400,
+                admin=target_admin,
+                service_id=payload.service_id,
+                service_without_assignment=service_filter_by_null,
             )
             detail = "Expiration dates extended"
         elif payload.action == AdvancedUserAction.reduce_expire:
             affected = crud.adjust_all_users_expire(
-                db, -payload.days * 86400, admin=target_admin, service_id=payload.service_id
+                db,
+                -payload.days * 86400,
+                admin=target_admin,
+                service_id=payload.service_id,
+                service_without_assignment=service_filter_by_null,
             )
             detail = "Expiration dates shortened"
         elif payload.action == AdvancedUserAction.increase_traffic:
             delta = max(1, int(round(payload.gigabytes * 1073741824)))
             affected = crud.adjust_all_users_limit(
-                db, delta, admin=target_admin, service_id=payload.service_id
+                db,
+                delta,
+                admin=target_admin,
+                service_id=payload.service_id,
+                service_without_assignment=service_filter_by_null,
             )
             detail = "Data limits increased for users"
         elif payload.action == AdvancedUserAction.decrease_traffic:
             delta = max(1, int(round(payload.gigabytes * 1073741824)))
             affected = crud.adjust_all_users_limit(
-                db, -delta, admin=target_admin, service_id=payload.service_id
+                db,
+                -delta,
+                admin=target_admin,
+                service_id=payload.service_id,
+                service_without_assignment=service_filter_by_null,
             )
             detail = "Data limits decreased for users"
         elif payload.action == AdvancedUserAction.cleanup_status:
             affected = crud.delete_users_by_status_age(
-                db, payload.statuses, payload.days, admin=target_admin, service_id=payload.service_id
+                db,
+                payload.statuses,
+                payload.days,
+                admin=target_admin,
+                service_id=payload.service_id,
+                service_without_assignment=service_filter_by_null,
             )
             detail = "Users removed by status age"
         elif payload.action == AdvancedUserAction.activate_users:
             affected = crud.bulk_update_user_status(
-                db, UserStatus.active, admin=target_admin, service_id=payload.service_id
+                db,
+                UserStatus.active,
+                admin=target_admin,
+                service_id=payload.service_id,
+                service_without_assignment=service_filter_by_null,
             )
             detail = "Users activated"
         elif payload.action == AdvancedUserAction.disable_users:
             affected = crud.bulk_update_user_status(
-                db, UserStatus.disabled, admin=target_admin, service_id=payload.service_id
+                db,
+                UserStatus.disabled,
+                admin=target_admin,
+                service_id=payload.service_id,
+                service_without_assignment=service_filter_by_null,
             )
             detail = "Users disabled"
         elif payload.action == AdvancedUserAction.change_service:
-            if not destination_service:
-                raise HTTPException(status_code=400, detail="Target service not provided")
-            user_count = crud.count_users(db, admin=target_admin, service_id=payload.service_id)
-            use_fast_path = payload.service_id is None or user_count > 1000
-            if use_fast_path:
-                affected = crud.move_users_to_service_fast(
+            if target_service_id is None:
+                affected = crud.clear_users_service(
                     db,
-                    destination_service,
                     admin=target_admin,
                     service_id=payload.service_id,
+                    service_without_assignment=service_filter_by_null,
                 )
+                detail = "Users removed from service"
             else:
-                affected = crud.move_users_to_service(
+                if not destination_service:
+                    raise HTTPException(status_code=400, detail="Target service not provided")
+                user_count = crud.count_users(
                     db,
-                    destination_service,
                     admin=target_admin,
                     service_id=payload.service_id,
+                    service_without_assignment=service_filter_by_null,
                 )
-            if destination_service.id is not None:
-                crud.refresh_service_users_by_id(db, destination_service.id)
-            detail = "Users moved to target service"
+                use_fast_path = payload.service_id is None or user_count > 1000
+                if use_fast_path:
+                    affected = crud.move_users_to_service_fast(
+                        db,
+                        destination_service,
+                        admin=target_admin,
+                        service_id=payload.service_id,
+                        service_without_assignment=service_filter_by_null,
+                    )
+                else:
+                    affected = crud.move_users_to_service(
+                        db,
+                        destination_service,
+                        admin=target_admin,
+                        service_id=payload.service_id,
+                        service_without_assignment=service_filter_by_null,
+                    )
+                if destination_service.id is not None:
+                    crud.refresh_service_users_by_id(db, destination_service.id)
+                detail = "Users moved to target service"
     except UsersLimitReachedError as exc:
         report.admin_users_limit_reached(admin, exc.limit, exc.current_active)
         db.rollback()

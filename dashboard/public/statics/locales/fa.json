@@ -224,6 +224,7 @@
   "filters.advancedActions.serviceChange.button": "انتقال به سرویس",
   "filters.advancedActions.serviceChange.helper": "کاربران فیلترشده را به یک سرویس دیگر منتقل کنید.",
   "filters.advancedActions.serviceChange.placeholder": "انتخاب سرویس مقصد",
+  "filters.advancedActions.serviceChange.noService": "بدون سرویس",
   "filters.advancedActions.serviceChange.title": "تغییر سرویس کاربران",
   "filters.advancedActions.error.targetServiceRequired": "سرویس مقصد را انتخاب کنید.",
   "filters.advancedActions.success.changeService": "{{count}} کاربر به سرویس مقصد منتقل شد.",

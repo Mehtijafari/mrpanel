@@ -94,6 +94,7 @@ class BulkUsersActionRequest(BaseModel):
     admin_username: Optional[str] = None
     service_id: Optional[int] = None
     target_service_id: Optional[int] = None
+    service_id_is_null: Optional[bool] = None
 
     @model_validator(mode="after")
     def _validate_action(self):
@@ -133,8 +134,10 @@ class BulkUsersActionRequest(BaseModel):
         if service_id is not None and service_id <= 0:
             raise ValueError("service_id must be a positive integer")
         if action == AdvancedUserAction.change_service:
-            if target_service_id is None or target_service_id <= 0:
-                raise ValueError("target_service_id must be a positive integer for change_service")
+            if target_service_id is not None and target_service_id <= 0:
+                raise ValueError("target_service_id must be a positive integer when provided for change_service")
+        if self.service_id_is_null and service_id is not None:
+            raise ValueError("service_id and service_id_is_null cannot both be set")
 
         return self
 

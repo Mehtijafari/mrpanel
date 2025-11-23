@@ -131,9 +131,22 @@ def remove_user(dbuser: "DBUser"):
 
 
 def update_user(dbuser: "DBUser"):
+    if dbuser.proxies:
+        for proxy in dbuser.proxies:
+            _ = list(proxy.excluded_inbounds)
+    
     user = UserResponse.model_validate(dbuser)
     email = f"{dbuser.id}.{dbuser.username}"
     active_inbounds = []
+    
+    if not user.inbounds:
+        logger.warning(
+            f"User {dbuser.id} ({dbuser.username}) has no inbounds. "
+            f"Service: {dbuser.service_id}, Proxies: {[p.type for p in dbuser.proxies]}, "
+            f"Excluded inbounds: {[(p.type, [e.tag for e in p.excluded_inbounds]) for p in dbuser.proxies]}"
+        )
+        return
+    
     for proxy_type, inbound_tags in user.inbounds.items():
         for inbound_tag in inbound_tags:
             active_inbounds.append(inbound_tag)

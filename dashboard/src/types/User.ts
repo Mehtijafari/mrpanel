@@ -147,7 +147,8 @@ export type AdvancedUserActionPayload = {
   statuses?: AdvancedUserActionStatus[];
   admin_username?: string | null;
   service_id?: number;
-  target_service_id?: number;
+  service_id_is_null?: boolean;
+  target_service_id?: number | null;
 };
 
 export type AdvancedUserActionResponse = {
