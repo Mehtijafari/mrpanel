@@ -4,12 +4,14 @@ import subprocess
 import threading
 from collections import deque
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Optional
 
 import logging
 
 import app.utils.system as system_utils
 from app.reb_node.config import XRayConfig
+from config import XRAY_LOG_DIR, XRAY_ASSETS_PATH
 
 try:
     from cryptography.hazmat.primitives.asymmetric import x25519 as crypto_x25519
@@ -225,14 +227,38 @@ class XRayCore:
         if self.started is True:
             raise RuntimeError("Xray is started already")
 
-        # Enable access log to see all connection attempts (including failed ones)
-        # Access log helps diagnose connection issues
-        # Note: logLevel should be set in Xray config, not here
-        log_config = config.get("log", {})
-        if "access" not in log_config:
-            log_config["access"] = ""  # Empty string means log to stdout
-        elif log_config.get("access") is None:
-            log_config["access"] = ""  # Enable if disabled
+        def _resolve_log_path(value: str | None, filename: str, base_dir: Path) -> str | None:
+            if value is None:
+                return ""
+            if isinstance(value, str):
+                lowered = value.strip().lower()
+                if lowered == "none":
+                    return "none"
+                if not value.strip():
+                    return ""
+                candidate = Path(value.strip())
+                # If user provided only filename or root-level filename (e.g., "/access.log"), place under base_dir.
+                if not candidate.is_absolute() or candidate.parent == Path("/"):
+                    return str(base_dir / candidate.name)
+                return str(candidate)
+            return str(base_dir / filename)
+
+        base_log_dir = Path(XRAY_LOG_DIR or XRAY_ASSETS_PATH or "/var/log").expanduser()
+
+        # Enable access/error log defaults to stdout unless overridden; resolve paths per runtime.
+        log_config = config.get("log", {}) if isinstance(config.get("log", {}), dict) else {}
+        log_config.setdefault("access", "")
+        log_config.setdefault("error", "")
+
+        for key, filename in (("access", "access.log"), ("error", "error.log")):
+            resolved = _resolve_log_path(log_config.get(key), filename, base_log_dir)
+            log_config[key] = resolved
+            if resolved and isinstance(resolved, str) and resolved.lower() != "none":
+                try:
+                    Path(resolved).expanduser().parent.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+
         config["log"] = log_config
 
         cmd = [self.executable_path, "run", "-config", "stdin:"]

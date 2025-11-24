@@ -37,6 +37,31 @@ GITHUB_RELEASES = "https://api.github.com/repos/XTLS/Xray-core/releases"
 GEO_TEMPLATES_INDEX_DEFAULT = "https://raw.githubusercontent.com/ppouria/geo-templates/main/index.json"
 
 
+def _resolve_template_files(template_index_url: str, template_name: str) -> list[dict]:
+    """
+    Fetch template index and return file list. If template_name is empty, pick the first template.
+    """
+    try:
+        r = requests.get(template_index_url, timeout=60)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        raise HTTPException(502, detail=f"Failed to fetch template index: {e}")
+
+    candidates = data.get("templates", data if isinstance(data, list) else [])
+    if not isinstance(candidates, list) or not candidates:
+        raise HTTPException(404, detail="No templates found in index.")
+
+    target_name = template_name or candidates[0].get("name") or ""
+    found = next((t for t in candidates if t.get("name") == target_name), None)
+    if not found:
+        raise HTTPException(404, detail="Template not found in index.")
+
+    links = found.get("links") or {}
+    files = found.get("files") or [{"name": k, "url": v} for k, v in links.items()]
+    return files
+
+
 def _detect_asset_name() -> str:
     sys_name = platform.system().lower()
     arch = platform.machine().lower()
@@ -401,32 +426,21 @@ def apply_geo_assets(
     mode = (payload.get("mode") or "default").strip().lower()
     files = payload.get("files") or []
 
-    template_index_url = (payload.get("template_index_url") or GEO_TEMPLATES_INDEX_DEFAULT).strip()
-    template_name = (payload.get("template_name") or "").strip()
-    if not files and template_name:
-        try:
-            r = requests.get(template_index_url, timeout=60)
-            r.raise_for_status()
-            data = r.json()
-        except Exception as e:
-            raise HTTPException(502, detail=f"Failed to fetch template index: {e}")
-        candidates = data.get("templates", data if isinstance(data, list) else [])
-        found = None
-        for t in candidates:
-            if t.get("name") == template_name:
-                found = t
-                break
-        if not found:
-            raise HTTPException(404, detail="Template not found in index.")
-        links = found.get("links") or {}
-        files = found.get("files") or [{"name": k, "url": v} for k, v in links.items()]
+    template_index_url = (
+        payload.get("template_index_url")
+        or payload.get("templateIndexUrl")
+        or GEO_TEMPLATES_INDEX_DEFAULT
+    ).strip()
+    template_name = (payload.get("template_name") or payload.get("templateName") or "").strip()
+    if not files and (mode == "template" or template_name):
+        files = _resolve_template_files(template_index_url, template_name)
 
     if not files or not isinstance(files, list):
         raise HTTPException(422, detail="'files' must be a non-empty list of {name,url}.")
 
-    persist_env = bool(payload.get("persist_env", True))
-    apply_to_nodes = bool(payload.get("apply_to_nodes", False))
-    skip_node_ids = set(payload.get("skip_node_ids") or [])
+    persist_env = bool(payload.get("persist_env", payload.get("persistEnv", True)))
+    apply_to_nodes = bool(payload.get("apply_to_nodes", payload.get("applyToNodes", False)))
+    skip_node_ids = set(payload.get("skip_node_ids") or payload.get("skipNodeIds") or [])
 
     master_assets_dir = _resolve_assets_path_master(persist_env=persist_env)
     saved = _download_geo_files(master_assets_dir, files)
@@ -438,7 +452,7 @@ def apply_geo_assets(
         "master": {"assets_path": str(master_assets_dir), "files": len(saved)},
         "nodes": {},
     }
-    if mode == "default" and apply_to_nodes:
+    if apply_to_nodes:
         for node_id, node in list(xray.nodes.items()):
             if node_id in skip_node_ids:
                 continue
@@ -458,6 +472,41 @@ def apply_geo_assets(
                 results["nodes"][str(node_id)] = {"status": "error", "detail": str(e)}
 
     return results
+
+
+@router.post("/core/geo/update", responses={403: responses._403})
+def update_geo_assets(
+    payload: dict = Body(
+        ...,
+        example={
+            "mode": "template",
+            "templateIndexUrl": GEO_TEMPLATES_INDEX_DEFAULT,
+            "templateName": "standard",
+            "files": [],
+            "persistEnv": True,
+            "applyToNodes": False,
+            "skipNodeIds": [],
+        },
+    ),
+    admin: Admin = Depends(Admin.check_sudo_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Backward-compatible alias used by the dashboard to update geo files on the master (and optionally nodes).
+    Accepts camelCase keys from the frontend and forwards to the main handler.
+    """
+    normalized_payload = {
+        "mode": payload.get("mode", "default"),
+        "files": payload.get("files") or [],
+        "template_index_url": payload.get("template_index_url")
+        or payload.get("templateIndexUrl")
+        or GEO_TEMPLATES_INDEX_DEFAULT,
+        "template_name": payload.get("template_name") or payload.get("templateName") or "",
+        "persist_env": payload.get("persist_env", payload.get("persistEnv", True)),
+        "apply_to_nodes": payload.get("apply_to_nodes", payload.get("applyToNodes", False)),
+        "skip_node_ids": payload.get("skip_node_ids") or payload.get("skipNodeIds") or [],
+    }
+    return apply_geo_assets(normalized_payload, admin, db)
 
 
 def _warp_service(db: Session) -> WarpService:

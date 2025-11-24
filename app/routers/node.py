@@ -25,6 +25,8 @@ from app.models.node import (
 from app.models.proxy import ProxyHost
 from app.utils import responses, report
 from app.db.models import MasterNodeState as DBMasterNodeState, Node as DBNode
+from app.routers.core import GEO_TEMPLATES_INDEX_DEFAULT
+from fastapi import HTTPException
 
 router = APIRouter(
     tags=["Node"], prefix="/api", responses={401: responses._401, 403: responses._403}
@@ -385,10 +387,15 @@ def update_node_geo(
     Supports direct files list or template selection.
     """
     files = payload.get("files") or []
-    template_index_url = payload.get("template_index_url") or ""
-    template_name = payload.get("template_name") or ""
+    mode = (payload.get("mode") or "").strip().lower()
+    template_index_url = (
+        payload.get("template_index_url")
+        or payload.get("templateIndexUrl")
+        or GEO_TEMPLATES_INDEX_DEFAULT
+    ).strip()
+    template_name = (payload.get("template_name") or payload.get("templateName") or "").strip()
 
-    if not files and (template_index_url and template_name):
+    if not files and (mode == "template" or template_name):
         try:
             r = requests.get(template_index_url, timeout=60)
             r.raise_for_status()
@@ -396,15 +403,16 @@ def update_node_geo(
         except Exception as e:
             raise HTTPException(502, detail=f"Failed to fetch template index: {e}")
         candidates = data.get("templates", data if isinstance(data, list) else [])
-        found = None
-        for t in candidates:
-            if t.get("name") == template_name:
-                found = t
-                break
+        if not isinstance(candidates, list) or not candidates:
+            raise HTTPException(404, detail="No templates found in index.")
+
+        target_name = template_name or candidates[0].get("name") or ""
+        found = next((t for t in candidates if t.get("name") == target_name), None)
         if not found:
             raise HTTPException(404, detail="Template not found in index.")
+
         links = found.get("links") or {}
-        files = [{"name": k, "url": v} for k, v in links.items()]
+        files = found.get("files") or [{"name": k, "url": v} for k, v in links.items()]
 
     if not files or not isinstance(files, list):
         raise HTTPException(422, detail="'files' must be a non-empty list of {name,url}.")

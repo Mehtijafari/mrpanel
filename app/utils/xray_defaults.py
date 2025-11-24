@@ -7,6 +7,8 @@ import os
 
 import commentjson
 
+from config import XRAY_LOG_DIR, XRAY_ASSETS_PATH
+
 
 _DEFAULT_XRAY_CONFIG: dict[str, Any] = {
     "log": {
@@ -46,6 +48,21 @@ _DEFAULT_XRAY_CONFIG: dict[str, Any] = {
         },
     ],
 }
+
+
+def apply_log_paths(config: dict[str, Any]) -> dict[str, Any]:
+    """
+    Normalize presence of log config without forcing absolute paths; actual paths are resolved per-runtime.
+    """
+    cfg = deepcopy(config or {})
+    log_cfg = cfg.get("log") or {}
+    if not isinstance(log_cfg, dict):
+        log_cfg = {}
+    # Keep existing values; set defaults to empty (stdout) so callers can override at runtime.
+    log_cfg.setdefault("access", log_cfg.get("access", ""))
+    log_cfg.setdefault("error", log_cfg.get("error", ""))
+    cfg["log"] = log_cfg
+    return cfg
 
 
 def get_default_xray_config() -> dict[str, Any]:
