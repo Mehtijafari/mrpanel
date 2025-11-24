@@ -317,6 +317,7 @@ class ProxyInboundRepository:
         inbound = self.get_or_create(inbound_tag)
         return (
             self.db.query(ProxyHost)
+            .options(joinedload(ProxyHost.service_links))
             .filter(ProxyHost.inbound_tag == inbound.tag)
             .order_by(ProxyHost.sort.asc(), ProxyHost.id.asc())
             .all()
@@ -2052,7 +2053,7 @@ def update_user(
     if modify.status is not None:
         dbuser.status = modify.status
 
-    if modify.data_limit is not None:
+    if "data_limit" in modify.model_fields_set:
         dbuser.data_limit = (modify.data_limit or None)
         if dbuser.status not in (UserStatus.expired, UserStatus.disabled):
             if not dbuser.data_limit or dbuser.used_traffic < dbuser.data_limit:
@@ -2062,7 +2063,7 @@ def update_user(
             else:
                 dbuser.status = UserStatus.limited
 
-    if modify.expire is not None:
+    if "expire" in modify.model_fields_set:
         dbuser.expire = (modify.expire or None)
         if dbuser.status in (UserStatus.active, UserStatus.expired):
             if not dbuser.expire or dbuser.expire > datetime.utcnow().timestamp():
@@ -4333,83 +4334,3 @@ def get_admin_usage_by_nodes(db: Session, dbadmin: Admin, start: datetime, end: 
     return sorted(usages, key=lambda x: x["node_id"] or 0)
 
 
-def fix_users_with_null_uuid(db: Session) -> Dict[str, int]:
-    """
-    Fix users with null UUID in proxies table by generating UUID from credential_key.
-    This function updates existing users who have credential_key but null UUID in their proxies.
-    
-    Args:
-        db (Session): Database session.
-    
-    Returns:
-        Dict[str, int]: Statistics about the fix operation:
-            - "fixed": Number of proxies fixed
-            - "skipped": Number of proxies skipped (no credential_key)
-            - "errors": Number of errors encountered
-    """
-    logger = logging.getLogger("uvicorn.error")
-    stats = {"fixed": 0, "skipped": 0, "errors": 0}
-    
-    # Find all users with credential_key
-    users_with_key = db.query(User).filter(
-        User.credential_key.isnot(None),
-        User.status != UserStatus.deleted
-    ).all()
-    
-    for dbuser in users_with_key:
-        if not dbuser.credential_key:
-            continue
-            
-        try:
-            normalized_key = normalize_key(dbuser.credential_key)
-        except ValueError:
-            logger.warning(f"User {dbuser.id} ({dbuser.username}) has invalid credential_key, skipping")
-            stats["skipped"] += len(dbuser.proxies)
-            continue
-        
-        updated = False
-        for proxy in dbuser.proxies:
-            proxy_type = proxy.type
-            if isinstance(proxy_type, str):
-                try:
-                    proxy_type = ProxyTypes(proxy_type)
-                except (ValueError, KeyError):
-                    continue
-            
-            # Only fix UUID protocols (VMess, VLESS)
-            if proxy_type not in UUID_PROTOCOLS:
-                continue
-            
-            # Check if UUID is null or missing
-            settings = proxy.settings if isinstance(proxy.settings, dict) else {}
-            existing_id = settings.get("id")
-            
-            # Skip if UUID already exists
-            if existing_id:
-                continue
-            
-            try:
-                # Generate UUID from credential_key
-                generated_uuid = key_to_uuid(normalized_key, proxy_type)
-                uuid_str = str(generated_uuid)
-                
-                # Update proxy settings with generated UUID
-                settings["id"] = uuid_str
-                proxy.settings = settings
-                updated = True
-                stats["fixed"] += 1
-                
-                logger.info(f"Fixed UUID for user {dbuser.id} ({dbuser.username}), proxy type {proxy_type.value}")
-            except Exception as e:
-                logger.error(f"Failed to generate UUID for user {dbuser.id} ({dbuser.username}), proxy type {proxy_type.value}: {e}")
-                stats["errors"] += 1
-        
-        if updated:
-            try:
-                db.commit()
-            except Exception as e:
-                logger.error(f"Failed to commit changes for user {dbuser.id}: {e}")
-                db.rollback()
-                stats["errors"] += 1
-    
-    return stats

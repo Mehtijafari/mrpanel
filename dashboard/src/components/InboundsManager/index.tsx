@@ -100,6 +100,22 @@ export const InboundsManager: FC = () => {
   const handleSubmit = async (values: InboundFormValues) => {
     setIsMutating(true);
     try {
+      const normalizedTag = (values.tag || "").trim().toLowerCase();
+      const tagExists = inbounds.some(
+        (inb) =>
+          (inb.tag || "").trim().toLowerCase() === normalizedTag &&
+          (drawerMode === "create" || inb.tag !== selected?.tag)
+      );
+      const portExists = inbounds.some(
+        (inb) => inb.port?.toString() === values.port && (drawerMode === "create" || inb.tag !== selected?.tag)
+      );
+      if (tagExists) {
+        throw new Error(t("inbounds.error.tagExists", "Inbound tag already exists"));
+      }
+      if (portExists) {
+        throw new Error(t("inbounds.error.portExists", "Inbound port already exists"));
+      }
+
       const payload = buildInboundPayload(values);
       const url =
         drawerMode === "create"
@@ -355,6 +371,7 @@ export const InboundsManager: FC = () => {
         mode={drawerMode}
         initialValue={selected}
         isSubmitting={isMutating}
+        existingInbounds={inbounds}
         onClose={onClose}
         onSubmit={handleSubmit}
       />

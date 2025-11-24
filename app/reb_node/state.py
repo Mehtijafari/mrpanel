@@ -1,5 +1,5 @@
 from random import randint
-from typing import TYPE_CHECKING, Dict, Sequence
+from typing import TYPE_CHECKING, Dict, Optional, Sequence
 
 from app.db import GetDB, crud
 from app.models.proxy import ProxyHostSecurity
@@ -37,6 +37,7 @@ except Exception as e:
 api = XRayAPI(config.api_host, config.api_port)
 
 nodes: Dict[int, XRayNode] = {}
+service_hosts_cache: Dict[Optional[int], Dict[str, list]] = {}
 
 
 if TYPE_CHECKING:
@@ -52,6 +53,7 @@ def hosts(storage: dict):
     from app import runtime
 
     storage.clear()
+    service_hosts_cache.clear()
     current_config = getattr(getattr(runtime, "xray", None), "config", None) or config
 
     with GetDB() as db:
@@ -85,7 +87,18 @@ def hosts(storage: dict):
                     "use_sni_as_host": host.use_sni_as_host,
                     "sort": host.sort if host.sort is not None else 0,
                     "id": host.id,
+                    "service_ids": [
+                        link.service_id
+                        for link in getattr(host, "service_links", [])
+                        if link.service_id is not None
+                    ],
                 }
                 for host in sorted_hosts
                 if not host.is_disabled
             ]
+
+            # Cache hosts per service (and for unassigned hosts) to avoid repeated DB lookups.
+            for host in storage[inbound_tag]:
+                target_services = host["service_ids"] or [None]
+                for service_id in target_services:
+                    service_hosts_cache.setdefault(service_id, {}).setdefault(inbound_tag, []).append(host)

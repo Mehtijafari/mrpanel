@@ -336,9 +336,27 @@ def generate_reality_keypair(
         result = xray.core.get_x25519()
         if not result:
             raise HTTPException(status_code=500, detail="Failed to generate key pair")
+
+        priv_hex = result.get("private_key")
+        pub_hex = result.get("public_key")
+        if not priv_hex or not pub_hex:
+            raise HTTPException(status_code=500, detail="Failed to generate key pair")
+
+        try:
+            priv_bytes = bytes.fromhex(priv_hex.strip())
+            pub_bytes = bytes.fromhex(pub_hex.strip())
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="Failed to parse generated key pair") from exc
+
+        if len(priv_bytes) != 32 or len(pub_bytes) != 32:
+            raise HTTPException(status_code=500, detail="Generated key pair is invalid")
+
+        priv_b64 = base64.urlsafe_b64encode(priv_bytes).rstrip(b"=").decode("utf-8")
+        pub_b64 = base64.urlsafe_b64encode(pub_bytes).rstrip(b"=").decode("utf-8")
+
         return {
-            "privateKey": result["private_key"],
-            "publicKey": result["public_key"]
+            "privateKey": priv_b64,
+            "publicKey": pub_b64
         }
     except FileNotFoundError as exc:
         raise HTTPException(status_code=500, detail="Xray binary not found") from exc
@@ -572,6 +590,10 @@ def _normalize_reality_private_key(private_key: str) -> str:
     
     # Remove all whitespace
     normalized = "".join(private_key.split())
+
+    if re.fullmatch(r"[0-9a-fA-F]{64}", normalized):
+        decoded = bytes.fromhex(normalized)
+        return base64.urlsafe_b64encode(decoded).rstrip(b"=").decode("utf-8")
     
     # Try base64url first (Xray's preferred format)
     try:

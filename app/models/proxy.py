@@ -56,7 +56,24 @@ class ProxyTypes(str, Enum):
 class ProxySettings(BaseModel, use_enum_values=True):
     @classmethod
     def from_dict(cls, proxy_type: ProxyTypes, _dict: dict):
-        return ProxyTypes(proxy_type).settings_model.model_validate(_dict)
+        model_cls = ProxyTypes(proxy_type).settings_model
+        try:
+            return model_cls.model_validate(_dict)
+        except Exception:
+            # Attempt to coerce bad UUID strings for UUID-based protocols
+            if proxy_type in {ProxyTypes.VMess, ProxyTypes.VLESS}:
+                cleaned = dict(_dict or {})
+                raw_id = cleaned.get("id")
+                if isinstance(raw_id, str):
+                    normalized = re.sub(r"[^0-9a-fA-F-]", "", raw_id)
+                    try:
+                        cleaned["id"] = UUID(normalized)
+                    except Exception:
+                        cleaned["id"] = None
+                else:
+                    cleaned["id"] = None
+                return model_cls.model_validate(cleaned)
+            return model_cls.model_validate(_dict)
 
     def dict(self, *, no_obj=False, **kwargs):
         if no_obj:

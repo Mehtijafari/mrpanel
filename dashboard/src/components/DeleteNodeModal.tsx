@@ -46,6 +46,9 @@ export const DeleteNodeModal: FC<DeleteUserModalProps> = ({
     onError: (e) => {
       generateErrorMessage(e, toast);
     },
+    onSettled: () => {
+      setDeletingNode(null);
+    },
   });
 
   return (

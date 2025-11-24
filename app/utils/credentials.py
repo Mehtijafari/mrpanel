@@ -2,7 +2,7 @@ import hashlib
 import secrets
 import uuid
 from functools import lru_cache
-from typing import TYPE_CHECKING, Dict, MutableMapping, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, MutableMapping, Optional, Union
 from uuid import UUID
 
 from app.models.proxy import ProxySettings, ProxyTypes, ShadowsocksMethods
@@ -141,7 +141,37 @@ def runtime_proxy_settings(
     proxy_type: ProxyTypes,
     credential_key: Optional[str],
 ) -> dict:
-    data = settings.dict(no_obj=True)
+    def _sanitize_uuid(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, UUID):
+            return str(value)
+        if isinstance(value, str):
+            cleaned = value.strip()
+            try:
+                return str(UUID(cleaned))
+            except Exception:
+                cleaned = re.sub(r"[^0-9a-fA-F-]", "", cleaned)
+                try:
+                    return str(UUID(cleaned))
+                except Exception:
+                    return None
+        return None
+
+    if isinstance(settings, ProxySettings):
+        data = settings.dict(no_obj=True)
+    elif isinstance(settings, dict):
+        try:
+            model = proxy_type.settings_model.model_validate(settings)
+            data = model.dict(no_obj=True)
+        except Exception:
+            data = dict(settings)
+    else:
+        data = {}
+
+    current_id = data.get("id")
+    sanitized_id = _sanitize_uuid(current_id)
+
     if credential_key:
         normalized = normalize_key(credential_key)
         if proxy_type in UUID_PROTOCOLS:
@@ -152,10 +182,31 @@ def runtime_proxy_settings(
             data["password"] = key_to_password(normalized, proxy_type.value)
             data.setdefault("method", ShadowsocksMethods.CHACHA20_POLY1305.value)
     else:
-        if proxy_type in UUID_PROTOCOLS and "id" not in data:
-            raise ValueError(f"UUID is required for proxy type {proxy_type}")
-        if proxy_type in PASSWORD_PROTOCOLS and "password" not in data:
-            raise ValueError(f"Password is required for proxy type {proxy_type}")
+        if proxy_type in UUID_PROTOCOLS:
+            if sanitized_id:
+                data["id"] = sanitized_id
+            else:
+                # Try to derive a credential key from stored UUIDs in proxies table
+                derived_key = None
+                raw_id = data.get("id")
+                if raw_id:
+                    try:
+                        derived_key = uuid_to_key(UUID(str(raw_id)), proxy_type)
+                    except Exception:
+                        derived_key = None
+                if derived_key:
+                    try:
+                        data["id"] = str(key_to_uuid(derived_key, proxy_type))
+                    except Exception:
+                        data["id"] = str(uuid.uuid4())
+                else:
+                    data["id"] = str(uuid.uuid4())
+        if proxy_type == ProxyTypes.Trojan:
+            data.setdefault("password", random_password())
+        if proxy_type == ProxyTypes.Shadowsocks:
+            data.setdefault("password", random_password())
+            data.setdefault("method", ShadowsocksMethods.CHACHA20_POLY1305.value)
+
     return data
 
 

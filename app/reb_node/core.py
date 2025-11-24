@@ -10,6 +10,13 @@ import logging
 
 import app.utils.system as system_utils
 from app.reb_node.config import XRayConfig
+
+try:
+    from cryptography.hazmat.primitives.asymmetric import x25519 as crypto_x25519
+    from cryptography.hazmat.primitives import serialization as crypto_serialization
+except Exception:  # pragma: no cover - optional import
+    crypto_x25519 = None
+    crypto_serialization = None
 from config import DEBUG
 
 
@@ -52,18 +59,55 @@ class XRayCore:
         if m:
             return m.groups()[0]
 
-    def get_x25519(self, private_key: str = None):
-        if not self.available:
-            raise RuntimeError("XRay is not available. Please install XRay to enable this functionality.")
+    def _generate_x25519_python(self, private_key: Optional[str] = None):
+        if crypto_x25519 is None:
+            raise RuntimeError("cryptography is not available to generate keys")
 
-        cmd = [self.executable_path, "x25519"]
+        def _parse_private(value: str) -> crypto_x25519.X25519PrivateKey:
+            cleaned = value.strip()
+            # Accept hex-encoded raw key
+            try:
+                raw = bytes.fromhex(cleaned)
+                if len(raw) != 32:
+                    raise ValueError("invalid length")
+                return crypto_x25519.X25519PrivateKey.from_private_bytes(raw)
+            except Exception as exc:
+                raise ValueError(f"Invalid private key provided: {exc}") from exc
+
         if private_key:
-            cmd.extend(["-i", private_key])
-        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode("utf-8")
-        m = re.match(r"Private key: (.+)\nPublic key: (.+)", output)
-        if m:
-            private, public = m.groups()
-            return {"private_key": private, "public_key": public}
+            priv_obj = _parse_private(private_key)
+        else:
+            priv_obj = crypto_x25519.X25519PrivateKey.generate()
+
+        pub_obj = priv_obj.public_key()
+        priv_hex = priv_obj.private_bytes(
+            encoding=crypto_serialization.Encoding.Raw,
+            format=crypto_serialization.PrivateFormat.Raw,
+            encryption_algorithm=crypto_serialization.NoEncryption(),
+        ).hex()
+        pub_hex = pub_obj.public_bytes(
+            encoding=crypto_serialization.Encoding.Raw,
+            format=crypto_serialization.PublicFormat.Raw,
+        ).hex()
+        return {"private_key": priv_hex, "public_key": pub_hex}
+
+    def get_x25519(self, private_key: str = None):
+        # Try Xray binary first when available, fall back to local generation.
+        if self.available:
+            try:
+                cmd = [self.executable_path, "x25519"]
+                if private_key:
+                    cmd.extend(["-i", private_key])
+                output = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode("utf-8")
+                m = re.match(r"Private key: (.+)\nPublic key: (.+)", output)
+                if m:
+                    private, public = m.groups()
+                    return {"private_key": private, "public_key": public}
+            except Exception as exc:
+                logger.warning("Falling back to local x25519 generation: %s", exc)
+
+        # Fallback to python implementation
+        return self._generate_x25519_python(private_key)
 
     def __capture_process_logs(self):
         def capture_and_debug_log():

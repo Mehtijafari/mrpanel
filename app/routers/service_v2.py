@@ -176,6 +176,7 @@ def create_service(
     service = crud.get_service(db, service.id)
     if not service:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Service not available")
+    xray.hosts.update()
     return _service_to_detail(db, service)
 
 
@@ -222,6 +223,8 @@ def modify_service(
         _refresh_service_users_background(service.id)
 
     db.refresh(service)
+    if hosts_modified:
+        xray.hosts.update()
     return _service_to_detail(db, service)
 
 
@@ -263,6 +266,7 @@ def delete_service(
         core_operations.remove_user(dbuser=dbuser)
     for dbuser in transferred_users:
         core_operations.update_user(dbuser=dbuser)
+    xray.hosts.update()
 
 
 @router.post("/{service_id}/reset-usage", response_model=ServiceDetail)

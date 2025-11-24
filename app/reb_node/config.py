@@ -640,12 +640,21 @@ class XRayConfig(dict):
                                     **existing_settings.copy()
                                 }
                                 
+                                # Remove null/invalid UUID from existing settings
+                                if 'id' in client_to_add and not _is_valid_uuid(client_to_add.get('id')):
+                                    del client_to_add['id']
+                                
                                 uuid_value = runtime_settings.get('id')
                                 if uuid_value:
                                     if isinstance(uuid_value, str):
                                         client_to_add['id'] = uuid_value
                                     else:
                                         client_to_add['id'] = str(uuid_value)
+                                elif 'id' not in client_to_add:
+                                    # If no UUID was generated and no UUID exists, skip this user
+                                    logger = logging.getLogger("uvicorn.error")
+                                    logger.warning(f"Failed to generate UUID from key for user {user_id} in include_db_users")
+                                    client_to_add = None
                                 
                                 for key, value in runtime_settings.items():
                                     if key != 'id':

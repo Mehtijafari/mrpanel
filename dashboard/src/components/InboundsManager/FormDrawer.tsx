@@ -30,7 +30,7 @@ import {
   useToast,
 } from "@chakra-ui/react";
 import type { InputProps, SelectProps, TextareaProps } from "@chakra-ui/react";
-import { QuestionMarkCircleIcon } from "@heroicons/react/24/outline";
+import { QuestionMarkCircleIcon, SparklesIcon } from "@heroicons/react/24/outline";
 import {
   Controller,
   useFieldArray,
@@ -68,6 +68,7 @@ type Props = {
   mode: "create" | "edit";
   initialValue: RawInbound | null;
   isSubmitting: boolean;
+  existingInbounds: RawInbound[];
   onClose: () => void;
   onSubmit: (values: InboundFormValues) => Promise<void>;
 };
@@ -131,6 +132,7 @@ export const InboundFormModal: FC<Props> = ({
   mode,
   initialValue,
   isSubmitting,
+  existingInbounds,
   onClose,
   onSubmit,
 }) => {
@@ -143,6 +145,10 @@ export const InboundFormModal: FC<Props> = ({
     defaultValues: createDefaultInboundForm(),
   });
   const { control, register, handleSubmit, reset, watch } = form;
+  const [tagManuallyEdited, setTagManuallyEdited] = useState(false);
+  const [portWarning, setPortWarning] = useState<string | null>(null);
+  const [tagError, setTagError] = useState<string | null>(null);
+  const [portError, setPortError] = useState<string | null>(null);
   const { fields: fallbackFields, append: appendFallback, remove: removeFallback } = useFieldArray({
     control,
     name: "fallbacks",
@@ -184,7 +190,12 @@ export const InboundFormModal: FC<Props> = ({
   const socksUdpEnabled =
     useWatch({ control, name: "socksUdpEnabled" }) ?? watch("socksUdpEnabled") ?? false;
   const xhttpMode = useWatch({ control, name: "xhttpMode" }) || watch("xhttpMode") || "auto";
+  const tagValue = useWatch({ control, name: "tag" }) || watch("tag") || "";
+  const portValue = useWatch({ control, name: "port" }) || watch("port") || "";
   const supportsStreamSettings = currentProtocol !== "http" && currentProtocol !== "socks";
+  const warningBg = useColorModeValue("yellow.50", "yellow.900");
+  const warningBorder = useColorModeValue("yellow.400", "yellow.500");
+  const hasBlockingErrors = Boolean(tagError || portError);
   const defaultVlessAuthLabels = useMemo(
     () => ["X25519, not Post-Quantum", "ML-KEM-768, Post-Quantum"],
     []
@@ -200,11 +211,126 @@ export const InboundFormModal: FC<Props> = ({
       if (initialValue) {
         const formValues = rawInboundToFormValues(initialValue);
         reset(formValues);
+        setTagManuallyEdited(true);
       } else {
         reset(createDefaultInboundForm());
+        setTagManuallyEdited(false);
+        setPortWarning(null);
       }
     }
   }, [initialValue, reset, isOpen]);
+
+  const BLOCKED_PORTS = useMemo(
+    () =>
+      new Set([
+        21, // FTP
+        22, // SSH
+        23, // Telnet
+        25, // SMTP
+        53, // DNS
+        67, // DHCP
+        68, // DHCP
+        110, // POP3
+        111, // Portmapper
+        123, // NTP
+        137, // NetBIOS
+        143, // IMAP
+        161, // SNMP
+        162, // SNMP Trap
+        993, // IMAP over SSL
+      ]),
+    []
+  );
+
+  const computeAutoTag = useCallback(
+    (protocol: string, network: string, port: string | number) => {
+      const cleanedPort = port?.toString().trim();
+      const parts = [protocol || "inbound", network || "net"];
+      if (cleanedPort) {
+        parts.push(cleanedPort);
+      }
+      return parts.join("+");
+    },
+    []
+  );
+
+  const generateRandomPort = useCallback(() => {
+    let candidate = 0;
+    for (let i = 0; i < 10; i += 1) {
+      const randomPort = Math.floor(Math.random() * 9000) + 1000; // 4-digit
+      if (!BLOCKED_PORTS.has(randomPort)) {
+        candidate = randomPort;
+        break;
+      }
+    }
+    if (!candidate) {
+      candidate = 4443;
+    }
+    form.setValue("port", candidate.toString(), { shouldDirty: true });
+    return candidate.toString();
+  }, [BLOCKED_PORTS, form]);
+
+  useEffect(() => {
+    if (mode === "create" && !initialValue) {
+      // Seed defaults on open
+      const currentPort = portValue || generateRandomPort();
+      const nextTag = computeAutoTag(currentProtocol, streamNetwork, currentPort);
+      form.setValue("tag", nextTag, { shouldDirty: true });
+      setTagError(null);
+      setPortError(null);
+    }
+  }, [mode, initialValue, currentProtocol, streamNetwork, portValue, computeAutoTag, generateRandomPort, form]);
+
+  useEffect(() => {
+    if (mode === "create" && !tagManuallyEdited) {
+      const nextTag = computeAutoTag(currentProtocol, streamNetwork, portValue);
+      form.setValue("tag", nextTag, { shouldDirty: true });
+    }
+  }, [mode, tagManuallyEdited, computeAutoTag, currentProtocol, streamNetwork, portValue, form]);
+
+  useEffect(() => {
+    if (!portValue) {
+      setPortWarning(null);
+      return;
+    }
+    const numeric = Number(portValue);
+    if (Number.isFinite(numeric) && BLOCKED_PORTS.has(numeric)) {
+      setPortWarning(
+        t(
+          "inbounds.portWarningBlocked",
+          "This port is commonly blocked by servers/firewalls. Better to avoid it."
+        )
+      );
+    } else {
+      setPortWarning(null);
+    }
+  }, [BLOCKED_PORTS, portValue, t]);
+
+  // Validation against existing inbounds
+  useEffect(() => {
+    const trimmedTag = (tagValue || "").trim();
+    if (mode === "edit") {
+      setTagError(null);
+      setPortError(null);
+      return;
+    }
+    if (
+      trimmedTag &&
+      existingInbounds.some((inb) => (inb.tag || "").trim().toLowerCase() === trimmedTag.toLowerCase())
+    ) {
+      setTagError(t("inbounds.error.tagExists", "Inbound tag already exists"));
+    } else {
+      setTagError(null);
+    }
+    if (
+      portValue &&
+      existingInbounds.some((inb) => inb.port?.toString() === portValue)
+    ) {
+      setPortError(t("inbounds.error.portExists", "Inbound port already exists"));
+    } else {
+      setPortError(null);
+    }
+  }, [existingInbounds, mode, portValue, tagValue, t]);
 
   const renderSockoptNumberInput = useCallback(
     (name: keyof SockoptFormValues, label: string) => (
@@ -444,12 +570,20 @@ export const InboundFormModal: FC<Props> = ({
               p={4}
             >
               <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
-                <FormControl isRequired>
+                <FormControl isRequired isInvalid={!!tagError}>
                   <FormLabel>{t("inbounds.tag", "Tag")}</FormLabel>
                   <Input
-                    {...register("tag", { required: true })}
+                    {...register("tag", {
+                      required: true,
+                      onChange: () => setTagManuallyEdited(true),
+                    })}
                     isDisabled={mode === "edit"}
                   />
+                  {tagError && (
+                    <Text fontSize="xs" color="red.500" mt={1}>
+                      {tagError}
+                    </Text>
+                  )}
                 </FormControl>
                 <FormControl>
                   <FormLabel>{t("inbounds.listen", "Listen address")}</FormLabel>
@@ -457,9 +591,43 @@ export const InboundFormModal: FC<Props> = ({
                 </FormControl>
               </SimpleGrid>
               <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
-                <FormControl isRequired>
+                <FormControl isRequired isInvalid={!!portError}>
                   <FormLabel>{t("inbounds.port", "Port")}</FormLabel>
-                  <Input placeholder="443" {...register("port", { required: true })} />
+                  <Input
+                    placeholder="443"
+                    {...register("port", { required: true })}
+                    value={portValue}
+                    onChange={(event) => {
+                      register("port").onChange(event);
+                      form.setValue("port", event.target.value, { shouldDirty: true });
+                    }}
+                    bg={portWarning ? warningBg : undefined}
+                    _dark={{
+                      bg: portWarning ? warningBg : undefined,
+                      color: "white",
+                    }}
+                    borderColor={portWarning ? warningBorder : undefined}
+                  />
+                  <HStack justify="space-between" mt={1}>ار
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      leftIcon={<SparklesIcon width={16} height={16} />}
+                      onClick={() => generateRandomPort()}
+                    >
+                      {t("inbounds.randomPort", "Random")}
+                    </Button>
+                  </HStack>
+                  {portWarning && (
+                    <Text fontSize="xs" color="yellow.600" mt={1}>
+                      {portWarning}
+                    </Text>
+                  )}
+                  {portError && (
+                    <Text fontSize="xs" color="red.500" mt={1}>
+                      {portError}
+                    </Text>
+                  )}
                 </FormControl>
                 <FormControl isRequired>
                   <FormLabel>{t("inbounds.protocol", "Protocol")}</FormLabel>
@@ -1281,6 +1449,7 @@ export const InboundFormModal: FC<Props> = ({
           <Button
             colorScheme="primary"
             isLoading={isSubmitting}
+            isDisabled={hasBlockingErrors}
             onClick={handleSubmit(submitForm)}
           >
             {mode === "create" ? t("common.create", "Create") : t("common.save", "Save")}

@@ -232,10 +232,14 @@ export const NodesPage: FC = () => {
     onSuccess: () => {
       generateSuccessMessage(t("nodes.addNodeSuccess"), toast);
       queryClient.invalidateQueries(FetchNodesQueryKey);
+      refetchNodes();
       setAddNodeOpen(false);
     },
     onError: (err) => {
       generateErrorMessage(err, toast);
+    },
+    onSettled: () => {
+      setAddNodeOpen(false);
     },
   });
 
@@ -243,10 +247,14 @@ export const NodesPage: FC = () => {
     onSuccess: () => {
       generateSuccessMessage(t("nodes.nodeUpdated"), toast);
       queryClient.invalidateQueries(FetchNodesQueryKey);
+      refetchNodes();
       setEditingNode(null);
     },
     onError: (err) => {
       generateErrorMessage(err, toast);
+    },
+    onSettled: () => {
+      setEditingNode(null);
     },
   });
 

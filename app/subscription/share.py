@@ -255,7 +255,32 @@ def process_inbounds_and_tags(
         reverse=False,
 ) -> Union[List, str]:
     from app.runtime import xray
-    xray.hosts.update()
+    service_id = extra_data.get("service_id")
+
+    def _select_host_map(service_id_value):
+        host_map = None
+
+        if hasattr(xray, "service_hosts_cache"):
+            host_map = xray.service_hosts_cache.get(service_id_value)
+            if host_map is None and service_id_value is not None:
+                host_map = xray.service_hosts_cache.get(None)
+            if not host_map:
+                xray.hosts.update()
+                host_map = (
+                    xray.service_hosts_cache.get(service_id_value)
+                    or xray.service_hosts_cache.get(None)
+                    or {}
+                )
+        else:
+            xray.hosts.update()
+            host_map = {
+                tag: xray.hosts.get(tag, [])
+                for tag in xray.config.inbounds_by_tag.keys()
+            }
+
+        return host_map
+
+    host_map = _select_host_map(service_id)
     inbound_index = {
         tag: index for index, tag in enumerate(xray.config.inbounds_by_tag.keys())
     }
@@ -277,7 +302,7 @@ def process_inbounds_and_tags(
             if not inbound:
                 continue
 
-            host_list = xray.hosts.get(tag, [])
+            host_list = host_map.get(tag, []) if host_map else []
             sorted_host_list = sorted(
                 host_list,
                 key=lambda h: (h.get("sort", 0), h.get("id") or 0)

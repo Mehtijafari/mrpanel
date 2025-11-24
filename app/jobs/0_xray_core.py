@@ -46,26 +46,43 @@ def start_core():
     logger.info("Generating Xray core config")
 
     start_time = time.time()
-    config = xray.config.include_db_users()
-    logger.info(f"Xray core config generated in {(time.time() - start_time):.2f} seconds")
+    try:
+        config = xray.config.include_db_users()
+        logger.info(f"Xray core config generated in {(time.time() - start_time):.2f} seconds")
+    except Exception as e:
+        logger.error(f"Failed to generate Xray config: {e}")
+        logger.warning("Panel will start without Xray core. Please fix the Xray configuration.")
+        traceback.print_exc()
+        return
 
     # main core
     logger.info("Starting main Xray core")
     try:
         xray.core.start(config)
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to start Xray core: {e}")
+        logger.warning("Panel will continue running without Xray core. Please fix the Xray configuration.")
         traceback.print_exc()
+        # Don't return here - continue to start nodes and scheduler
 
     # nodes' core
     logger.info("Starting nodes Xray core")
-    with GetDB() as db:
-        dbnodes = crud.get_nodes(db=db, enabled=True)
-        node_ids = [dbnode.id for dbnode in dbnodes]
-        for dbnode in dbnodes:
-            crud.update_node_status(db, dbnode, NodeStatus.connecting)
+    try:
+        with GetDB() as db:
+            dbnodes = crud.get_nodes(db=db, enabled=True)
+            node_ids = [dbnode.id for dbnode in dbnodes]
+            for dbnode in dbnodes:
+                crud.update_node_status(db, dbnode, NodeStatus.connecting)
 
-    for node_id in node_ids:
-        xray.operations.connect_node(node_id, config)
+        for node_id in node_ids:
+            try:
+                xray.operations.connect_node(node_id, config)
+            except Exception as e:
+                logger.error(f"Failed to connect to node {node_id}: {e}")
+                traceback.print_exc()
+    except Exception as e:
+        logger.error(f"Failed to start nodes: {e}")
+        traceback.print_exc()
 
     scheduler.add_job(
         core_health_check, "interval", seconds=JOB_CORE_HEALTH_CHECK_INTERVAL, coalesce=True, max_instances=1
