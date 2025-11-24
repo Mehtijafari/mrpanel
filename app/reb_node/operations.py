@@ -38,10 +38,21 @@ def get_tls():
 
 @threaded_function
 def _add_user_to_inbound(api: XRayAPI, inbound_tag: str, account: Account):
+    """
+    Add user to Xray inbound. If user already exists, remove and re-add to ensure UUID is correct.
+    """
     try:
         api.add_inbound_user(tag=inbound_tag, user=account, timeout=600)
-    except (xray_exceptions.EmailExistsError, xray_exceptions.ConnectionError):
+    except xray_exceptions.EmailExistsError:
+        try:
+            api.remove_inbound_user(tag=inbound_tag, email=account.email, timeout=600)
+            api.add_inbound_user(tag=inbound_tag, user=account, timeout=600)
+        except Exception as e:
+            logger.warning(f"Failed to update existing user {account.email} in {inbound_tag}: {e}")
+    except xray_exceptions.ConnectionError:
         pass
+    except Exception as e:
+        logger.error(f"Failed to add user {account.email} to {inbound_tag}: {e}")
 
 
 @threaded_function
@@ -54,14 +65,27 @@ def _remove_user_from_inbound(api: XRayAPI, inbound_tag: str, email: str):
 
 @threaded_function
 def _alter_inbound_user(api: XRayAPI, inbound_tag: str, account: Account):
+    """
+    Update user in Xray inbound by removing old entry and adding new one.
+    This ensures UUID is correctly synced, especially for credential_key based users.
+    """
     try:
         api.remove_inbound_user(tag=inbound_tag, email=account.email, timeout=600)
     except (xray_exceptions.EmailNotFoundError, xray_exceptions.ConnectionError):
         pass
+    except Exception as e:
+        logger.warning(f"Unexpected error removing user {account.email} from {inbound_tag}: {e}")
+    
     try:
         api.add_inbound_user(tag=inbound_tag, user=account, timeout=600)
     except (xray_exceptions.EmailExistsError, xray_exceptions.ConnectionError):
-        pass
+        try:
+            api.remove_inbound_user(tag=inbound_tag, email=account.email, timeout=600)
+            api.add_inbound_user(tag=inbound_tag, user=account, timeout=600)
+        except Exception as e:
+            logger.warning(f"Failed to update user {account.email} in {inbound_tag}: {e}")
+    except Exception as e:
+        logger.error(f"Failed to add user {account.email} to {inbound_tag}: {e}")
 
 
 def add_user(dbuser: "DBUser"):

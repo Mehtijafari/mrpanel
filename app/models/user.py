@@ -4,6 +4,7 @@ from datetime import datetime
 import math
 from enum import Enum
 from typing import Dict, List, Optional, Union
+from contextvars import ContextVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -20,6 +21,8 @@ from app.utils.jwt import create_subscription_token
 from config import XRAY_SUBSCRIPTION_PATH, XRAY_SUBSCRIPTION_URL_PREFIX
 
 USERNAME_REGEXP = re.compile(r"^(?=\w{3,32}\b)[a-zA-Z0-9-_@.]+(?:_[a-zA-Z0-9-_@.]+)*$")
+
+_skip_expensive_computations: ContextVar[bool] = ContextVar('skip_expensive_computations', default=False)
 
 
 def _normalize_ip_limit(value) -> int:
@@ -489,6 +492,9 @@ class UserResponse(User):
 
     @model_validator(mode="after")
     def validate_links(self):
+        # Skip expensive link generation when loading user lists
+        if _skip_expensive_computations.get():
+            return self
         if not self.links:
             self.links = generate_v2ray_links(
                 self.proxies, self.inbounds, extra_data=self.model_dump(), reverse=False,
@@ -497,6 +503,8 @@ class UserResponse(User):
 
     @model_validator(mode="after")
     def validate_subscription_url(self):
+        if _skip_expensive_computations.get():
+            return self
         if self.credential_key:
             salt = secrets.token_hex(8)
             url_prefix = (XRAY_SUBSCRIPTION_URL_PREFIX).replace('*', salt)
@@ -513,6 +521,8 @@ class UserResponse(User):
 
     @model_validator(mode="after")
     def populate_key_subscription_url(self):
+        if _skip_expensive_computations.get():
+            return self
         if self.credential_key and not hasattr(self, 'key_subscription_url'):
             salt = secrets.token_hex(8)
             url_prefix = (XRAY_SUBSCRIPTION_URL_PREFIX).replace('*', salt)

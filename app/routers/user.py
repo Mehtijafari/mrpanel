@@ -300,23 +300,30 @@ def get_users(
             admin=dbadmin,
         )
 
-    users, count = crud.get_users(
-        db=db,
-        offset=offset,
-        limit=limit,
-        search=search,
-        usernames=username,
-        status=status,
-        sort=sort,
-        advanced_filters=advanced_filters,
-        service_id=service_id,
-        admin=dbadmin,
-        admins=owners,
-        return_with_count=True,
-    )
+    from app.models.user import _skip_expensive_computations
+    token = _skip_expensive_computations.set(True)
+    try:
+        users, count = crud.get_users(
+            db=db,
+            offset=offset,
+            limit=limit,
+            search=search,
+            usernames=username,
+            status=status,
+            sort=sort,
+            advanced_filters=advanced_filters,
+            service_id=service_id,
+            admin=dbadmin,
+            admins=owners,
+            return_with_count=True,
+        )
+        
+        user_responses = [UserResponse.model_validate(user) for user in users]
+    finally:
+        _skip_expensive_computations.reset(token)
 
     return {
-        "users": users,
+        "users": user_responses,
         "total": count,
         "active_total": active_total,
         "users_limit": users_limit,

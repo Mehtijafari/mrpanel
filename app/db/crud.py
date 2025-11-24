@@ -1502,8 +1502,8 @@ def get_users(db: Session,
 
     query = query.options(
         joinedload(User.admin),
+        joinedload(User.service),
         selectinload(User.proxies),
-        selectinload(User.usage_logs),
     )
     if _next_plan_table_exists(db):
         query = query.options(joinedload(User.next_plan))

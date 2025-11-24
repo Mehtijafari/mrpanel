@@ -265,9 +265,6 @@ def process_inbounds_and_tags(
         service_host_orders = {
             int(k): v for k, v in service_host_orders.items()
         }
-        allowed_host_ids = set(service_host_orders.keys())
-    else:
-        allowed_host_ids = None
 
     host_entries = []
     for protocol, tags in inbounds.items():
@@ -286,10 +283,6 @@ def process_inbounds_and_tags(
                 key=lambda h: (h.get("sort", 0), h.get("id") or 0)
             )
             for position, host in enumerate(sorted_host_list):
-                host_id = host.get("id")
-                if allowed_host_ids is not None:
-                    if host_id is None or host_id not in allowed_host_ids:
-                        continue
                 host_entries.append(
                     (
                         protocol,
