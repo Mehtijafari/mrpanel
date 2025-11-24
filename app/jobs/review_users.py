@@ -74,13 +74,29 @@ def review():
                 else:
                     continue
 
-                xray.operations.remove_user(user)
-                update_user_status(db, user, status)
+                try:
+                    xray.operations.remove_user(user)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to remove user {user.id} ({user.username}) from XRay: {e}. "
+                        f"Status will still be updated to {status}."
+                    )
 
-                report.status_change(username=user.username, status=status,
-                                     user=UserResponse.model_validate(user), user_admin=user.admin)
-
-                logger.info(f"User \"{user.username}\" status changed to {status}")
+                try:
+                    update_user_status(db, user, status)
+                    logger.info(f"User \"{user.username}\" status changed to {status}")
+                    try:
+                        report.status_change(username=user.username, status=status,
+                                             user=UserResponse.model_validate(user), user_admin=user.admin)
+                    except Exception as report_error:
+                        logger.warning(
+                            f"Failed to send status change report for user {user.id} ({user.username}): {report_error}"
+                        )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to update status for user {user.id} ({user.username}) to {status}: {e}"
+                    )
+                    db.rollback()
 
             last_id = active_batch[-1].id
 

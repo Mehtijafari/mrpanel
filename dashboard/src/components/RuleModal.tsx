@@ -64,7 +64,7 @@ export type RoutingRule = {
   domain?: string[];
   ip?: string[];
   user?: string[];
-  port?: string[];
+  port?: string;
   attrs?: Record<string, string>;
 };
 
@@ -101,8 +101,15 @@ const defaultFormValues: RuleFormValues = {
   attrs: [],
 };
 
-const toDelimitedString = (value?: string[]) =>
-  Array.isArray(value) ? value.join(", ") : "";
+const toDelimitedString = (value?: string | string[]) => {
+  if (!value) {
+    return "";
+  }
+  if (Array.isArray(value)) {
+    return value.join(", ");
+  }
+  return value;
+};
 
 const splitStringList = (value: string) =>
   value
@@ -166,8 +173,8 @@ const formValuesToRule = (values: RuleFormValues): RoutingRule => {
   const user = splitStringList(values.user);
   if (user.length) rule.user = user;
 
-  const port = splitStringList(values.port);
-  if (port.length) rule.port = port;
+  const portValue = values.port.trim();
+  if (portValue) rule.port = portValue;
 
   if (values.attrs.length) {
     const attrs: Record<string, string> = {};
